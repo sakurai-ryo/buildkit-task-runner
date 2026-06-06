@@ -102,6 +102,9 @@ case gray:
 [`Builder.State`](https://github.com/sakurai-ryo/buildkit-task-runner/blob/4fcb094/internal/llbgen/llbgen.go#L47-L105) が、1つのタスクを 1つの `llb.State`（＝ DAG の部分木）に変換する中心。
 ここで使っている BuildKit の機能を順に見ていく。
 
+> 📖 `llb.State` 型そのもの（イミュータブル性・操作グラフとメタデータの2層構造・遅延評価・Marshal）を
+> BuildKit のソースまで踏み込んで解説した **[llb.State 深掘り](./llb-state.md)** もあわせて参照。
+
 ### 4-1. ベースイメージとイメージ設定の解決（落とし穴あり）
 
 ```go

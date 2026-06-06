@@ -87,6 +87,11 @@ go build -o btr ./cmd/btr
 ./btr run ci      # fmt + vet + build + test, run in parallel
 ```
 
+## Learning docs
+
+- [BuildKit の仕組み（学習メモ）](./docs/buildkit-mechanisms.md) — 利用した BuildKit 機能をコード対応付きで解説
+- [`llb.State` 深掘り](./docs/llb-state.md) — LLB API の中心型を BuildKit のソースまで踏み込んで解説
+
 ## Roadmap
 
 - Exporting build artifacts to the local filesystem (`SolveOpt.Exports`)
