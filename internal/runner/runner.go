@@ -1,0 +1,96 @@
+// Package runner connects to buildkitd and solves (executes) the LLB.
+package runner
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"runtime"
+	"strings"
+
+	"github.com/moby/buildkit/client"
+	"github.com/moby/buildkit/client/llb"
+	specs "github.com/opencontainers/image-spec/specs-go/v1"
+)
+
+// Address resolves the buildkitd address to connect to.
+// Priority: explicit addr > BUILDKIT_HOST env var > default unix socket.
+func Address(addr string) string {
+	if addr != "" {
+		return addr
+	}
+	if env := os.Getenv("BUILDKIT_HOST"); env != "" {
+		return env
+	}
+	return "unix:///run/buildkit/buildkitd.sock"
+}
+
+// Platform returns the LLB platform from the --platform string, or the host GOARCH if empty.
+func Platform(name string) llb.ConstraintsOpt {
+	switch name {
+	case "linux/amd64", "amd64":
+		return llb.Platform(specs.Platform{OS: "linux", Architecture: "amd64"})
+	case "linux/arm64", "arm64":
+		return llb.Platform(specs.Platform{OS: "linux", Architecture: "arm64"})
+	case "":
+		if runtime.GOARCH == "arm64" {
+			return llb.LinuxArm64
+		}
+		return llb.LinuxAmd64
+	default:
+		return llb.Platform(specs.Platform{OS: "linux", Architecture: name})
+	}
+}
+
+// Run solves (executes) st on buildkitd and prints progress to stdout.
+func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.State) error {
+	c, err := client.New(ctx, addr)
+	if err != nil {
+		return fmt.Errorf("failed to connect to buildkitd (%s): %w", addr, err)
+	}
+	defer c.Close()
+
+	def, err := st.Marshal(ctx, platform)
+	if err != nil {
+		return fmt.Errorf("failed to marshal LLB: %w", err)
+	}
+
+	ch := make(chan *client.SolveStatus)
+	done := make(chan struct{})
+	go func() {
+		printStatus(ch)
+		close(done)
+	}()
+
+	_, err = c.Solve(ctx, def, client.SolveOpt{}, ch)
+	<-done
+	if err != nil {
+		return fmt.Errorf("solve failed: %w", err)
+	}
+	return nil
+}
+
+// printStatus consumes the status channel and prints each step name and its logs plainly.
+func printStatus(ch chan *client.SolveStatus) {
+	for s := range ch {
+		for _, v := range s.Vertexes {
+			switch {
+			case v.Started != nil && v.Completed == nil:
+				fmt.Printf("▶ %s\n", v.Name)
+			case v.Completed != nil:
+				status := "done"
+				if v.Error != "" {
+					status = "ERROR: " + v.Error
+				} else if v.Cached {
+					status = "cached"
+				}
+				fmt.Printf("✔ %s (%s)\n", v.Name, status)
+			}
+		}
+		for _, l := range s.Logs {
+			for _, line := range strings.Split(strings.TrimRight(string(l.Data), "\n"), "\n") {
+				fmt.Printf("    %s\n", line)
+			}
+		}
+	}
+}

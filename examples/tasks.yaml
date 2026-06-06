@@ -1,0 +1,24 @@
+tasks:
+  deps:
+    image: golang:1.26-alpine
+    cmds:
+      - "echo downloading deps"
+      - "sleep 1"
+
+  lint:
+    image: golang:1.26-alpine
+    deps: [deps]
+    cmds:
+      - "echo linting"
+
+  build:
+    image: golang:1.26-alpine
+    deps: [deps]
+    cmds:
+      - "echo building"
+
+  all:
+    image: alpine:3.20
+    deps: [lint, build]
+    cmds:
+      - "echo done"
