@@ -1,0 +1,40 @@
+# Dogfooding: run btr's own dev tasks through btr itself.
+#   btr run ci    # fmt + vet + build + test
+#   btr run build
+#
+# Each task mounts the project source read-only at /src and shares Go's module
+# and build caches across tasks/runs via persistent cache mounts.
+
+x-go: &go
+  image: golang:1.26-alpine
+  source: .
+  caches:
+    - /go/pkg/mod
+    - /root/.cache/go-build
+
+tasks:
+  fmt:
+    <<: *go
+    cmds:
+      - "sh -c 'test -z \"$(gofmt -l .)\"'"
+
+  vet:
+    <<: *go
+    cmds:
+      - "go vet ./..."
+
+  build:
+    <<: *go
+    cmds:
+      - "go build -o /tmp/btr ./cmd/btr"
+
+  test:
+    <<: *go
+    cmds:
+      - "go test ./..."
+
+  ci:
+    <<: *go
+    deps: [fmt, vet, build, test]
+    cmds:
+      - "echo ci passed"

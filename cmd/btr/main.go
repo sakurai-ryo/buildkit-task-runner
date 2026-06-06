@@ -53,14 +53,15 @@ func newRunCmd() *cobra.Command {
 				return err
 			}
 
-			st, err := llbgen.New(cfg).State(target)
+			builder := llbgen.New(cfg)
+			st, err := builder.State(target)
 			if err != nil {
 				return err
 			}
 
 			resolvedAddr := runner.Address(addr)
 			fmt.Printf("buildkitd=%s task=%s\n", resolvedAddr, target)
-			return runner.Run(cmd.Context(), resolvedAddr, runner.Platform(platform), st)
+			return runner.Run(cmd.Context(), resolvedAddr, runner.Platform(platform), st, builder.LocalMounts())
 		},
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "tasks.yaml", "task definition file")

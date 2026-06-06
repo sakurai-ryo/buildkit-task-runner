@@ -11,6 +11,7 @@ import (
 	"github.com/moby/buildkit/client"
 	"github.com/moby/buildkit/client/llb"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
+	"github.com/tonistiigi/fsutil"
 )
 
 // Address resolves the buildkitd address to connect to.
@@ -43,7 +44,8 @@ func Platform(name string) llb.ConstraintsOpt {
 }
 
 // Run solves (executes) st on buildkitd and prints progress to stdout.
-func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.State) error {
+// localMounts maps llb.Local names to local directories to expose to the daemon.
+func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.State, localMounts map[string]string) error {
 	c, err := client.New(ctx, addr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to buildkitd (%s): %w", addr, err)
@@ -55,6 +57,19 @@ func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.S
 		return fmt.Errorf("failed to marshal LLB: %w", err)
 	}
 
+	solveOpt := client.SolveOpt{}
+	if len(localMounts) > 0 {
+		mounts := make(map[string]fsutil.FS, len(localMounts))
+		for name, dir := range localMounts {
+			fs, err := fsutil.NewFS(dir)
+			if err != nil {
+				return fmt.Errorf("failed to expose local directory %q: %w", dir, err)
+			}
+			mounts[name] = fs
+		}
+		solveOpt.LocalMounts = mounts
+	}
+
 	ch := make(chan *client.SolveStatus)
 	done := make(chan struct{})
 	go func() {
@@ -62,7 +77,7 @@ func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.S
 		close(done)
 	}()
 
-	_, err = c.Solve(ctx, def, client.SolveOpt{}, ch)
+	_, err = c.Solve(ctx, def, solveOpt, ch)
 	<-done
 	if err != nil {
 		return fmt.Errorf("solve failed: %w", err)

@@ -15,11 +15,13 @@ type Config struct {
 
 // Task is a single task definition. It runs cmds in order on top of the given image.
 type Task struct {
-	Image string            `yaml:"image"`
-	Cmds  []string          `yaml:"cmds"`
-	Deps  []string          `yaml:"deps"`
-	Env   map[string]string `yaml:"env"`
-	Dir   string            `yaml:"dir"`
+	Image  string            `yaml:"image"`
+	Cmds   []string          `yaml:"cmds"`
+	Deps   []string          `yaml:"deps"`
+	Env    map[string]string `yaml:"env"`
+	Dir    string            `yaml:"dir"`
+	Source string            `yaml:"source"` // local directory mounted read-only into the container (defaults workdir to /src)
+	Caches []string          `yaml:"caches"` // container paths backed by a shared persistent cache (e.g. /go/pkg/mod)
 }
 
 // Load reads the YAML at path and returns a validated Config.

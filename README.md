@@ -36,11 +36,13 @@ tasks:
 
 | Field   | Required | Description |
 |---------|:--------:|-------------|
-| `image` | ✓        | Base image |
-| `cmds`  | ✓        | Commands to run in order (at least one) |
-| `deps`  |          | Tasks that must complete first |
-| `env`   |          | Environment variables |
-| `dir`   |          | Working directory |
+| `image`  | ✓        | Base image (its config, e.g. `PATH`, is applied automatically) |
+| `cmds`   | ✓        | Commands to run in order (at least one) |
+| `deps`   |          | Tasks that must complete first |
+| `env`    |          | Environment variables |
+| `dir`    |          | Working directory (defaults to `/src` when `source` is set) |
+| `source` |          | Local directory mounted read-only into the container |
+| `caches` |          | Container paths backed by a shared persistent cache (e.g. `/go/pkg/mod`) |
 
 ## Usage
 
@@ -63,9 +65,19 @@ go build -o btr ./cmd/btr
 The target address is resolved in this order: the `--addr` flag → the `BUILDKIT_HOST` environment
 variable → the default unix socket.
 
+## Dogfooding
+
+`btr` runs its own dev tasks (defined in the root [`tasks.yaml`](./tasks.yaml)). Each task mounts the
+project source read-only at `/src` and shares Go's module and build caches across tasks/runs via
+persistent cache mounts, so repeated runs are fast.
+
+```sh
+go build -o btr ./cmd/btr
+./btr run ci      # fmt + vet + build + test, run in parallel
+```
+
 ## Roadmap
 
-- Mounting local sources (`llb.Local`)
 - Exporting build artifacts to the local filesystem (`SolveOpt.Exports`)
 - TUI progress display via progressui
 - `btr graph` (DOT output), variable expansion, cache import/export
