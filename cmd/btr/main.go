@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/sakurai-ryo/buildkit-task-runner/internal/config"
+	"github.com/sakurai-ryo/buildkit-task-runner/internal/debug"
 	"github.com/sakurai-ryo/buildkit-task-runner/internal/graph"
 	"github.com/sakurai-ryo/buildkit-task-runner/internal/llbgen"
 	"github.com/sakurai-ryo/buildkit-task-runner/internal/runner"
@@ -22,12 +23,18 @@ func main() {
 }
 
 func newRootCmd() *cobra.Command {
+	var dbg bool
 	root := &cobra.Command{
 		Use:          "btr",
 		Short:        "BuildKit Task Runner",
 		Long:         "btr declares tasks in YAML, compiles each into a BuildKit LLB state, and executes them on buildkitd.",
 		SilenceUsage: true,
+		PersistentPreRun: func(cmd *cobra.Command, args []string) {
+			// Enable debug logging from the --debug flag or BTR_DEBUG env var.
+			debug.SetEnabled(dbg || os.Getenv("BTR_DEBUG") != "")
+		},
 	}
+	root.PersistentFlags().BoolVar(&dbg, "debug", false, "print debug logs explaining each step (or set BTR_DEBUG)")
 	root.AddCommand(newRunCmd(), newListCmd(), newGraphCmd())
 	return root
 }

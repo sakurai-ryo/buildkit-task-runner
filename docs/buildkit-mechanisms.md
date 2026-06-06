@@ -258,7 +258,33 @@ LLB の**各頂点は、その入力内容のハッシュ**（ベースイメー
 
 ---
 
-## 6. 動かして確かめる
+## 6. デバッグログで動きを追う
+
+`--debug`（または `BTR_DEBUG=1`）を付けると、上記①〜⑤の各段階を stderr に実況する。
+特に `llbgen` のログは**インデントで再帰の深さ**を示し、共有依存が**メモ化で1回だけ**構築される様子も見える。
+
+`./btr run all -f examples/tasks.yaml --debug` の抜粋（`all → {lint, build} → deps` の例）:
+
+```
+[debug] graph: resolving dependencies from "all"
+[debug] graph: all deps=[lint build]
+[debug] graph:   lint deps=[deps]
+[debug] graph:     deps deps=[]
+[debug] graph:   build deps=[deps]
+[debug] graph:     deps (already checked)         ← DFS で deps に再到達（循環ではない）
+[debug] llbgen: task "all": building LLB (image=alpine:3.20, cmds=1, deps=[lint build])
+[debug] llbgen:   task "lint": building LLB ...
+[debug] llbgen:     task "deps": building LLB ... ← deps を初めて構築
+[debug] llbgen:   task "build": building LLB ...
+[debug] llbgen:     task "deps": reusing memoized state (shared dependency, built once)  ← ここがメモ化！
+[debug] runner: marshaled LLB definition (8 operations in the graph)
+[debug] runner: solving (buildkitd runs the graph with parallelism and caching)...
+[debug] runner: solve completed
+```
+
+ログの出力箇所はコード側の `debug.Logf(...)` 呼び出しと対応している（`internal/debug`、各パッケージ内）。
+
+## 7. 動かして確かめる
 
 ### GitHub Actions（おすすめ）
 [`buildkit-demo`](../.github/workflows/buildkit-demo.yml) を実行すると、ジョブサマリーに
@@ -281,7 +307,7 @@ go build -o btr ./cmd/btr
 
 ---
 
-## 7. 今回は使っていない（ロードマップ）
+## 8. 今回は使っていない（ロードマップ）
 
 - 成果物のローカル出力（`SolveOpt.Exports` / `ExportEntry`）— 今はコンテナ内で完結し、バイナリ等は取り出していない。
 - progressui による TUI 進捗表示 — 今は素朴な行出力。

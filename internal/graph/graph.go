@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/sakurai-ryo/buildkit-task-runner/internal/config"
+	"github.com/sakurai-ryo/buildkit-task-runner/internal/debug"
 )
 
 // State for three-color marking.
@@ -25,6 +26,7 @@ func Resolve(cfg *config.Config, target string) error {
 		return fmt.Errorf("task %q is not defined", target)
 	}
 
+	debug.Logf("graph: resolving dependencies from %q", target)
 	colors := make(map[string]color, len(cfg.Tasks))
 	var visit func(name string, path []string) error
 	visit = func(name string, path []string) error {
@@ -32,8 +34,10 @@ func Resolve(cfg *config.Config, target string) error {
 		case gray:
 			return fmt.Errorf("cyclic dependency detected: %v", append(path, name))
 		case black:
+			debug.Logf("graph: %*s%s (already checked)", 2*len(path), "", name)
 			return nil
 		}
+		debug.Logf("graph: %*s%s deps=%v", 2*len(path), "", name, cfg.Tasks[name].Deps)
 		colors[name] = gray
 		path = append(path, name)
 		for _, dep := range cfg.Tasks[name].Deps {
@@ -44,7 +48,11 @@ func Resolve(cfg *config.Config, target string) error {
 		colors[name] = black
 		return nil
 	}
-	return visit(target, nil)
+	if err := visit(target, nil); err != nil {
+		return err
+	}
+	debug.Logf("graph: ok, no cycles or undefined references")
+	return nil
 }
 
 // Mermaid renders the task dependency graph as a Mermaid flowchart.

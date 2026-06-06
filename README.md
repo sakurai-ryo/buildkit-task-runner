@@ -65,6 +65,17 @@ go build -o btr ./cmd/btr
 The target address is resolved in this order: the `--addr` flag → the `BUILDKIT_HOST` environment
 variable → the default unix socket.
 
+### Debug logs
+
+Pass `--debug` (or set `BTR_DEBUG=1`) to print, to stderr, a step-by-step narration of how the task
+definition is parsed, the dependency graph is walked, each task is turned into an LLB state (with
+indentation showing the recursion and memoized shared dependencies), and the graph is solved on
+buildkitd. Great for understanding what the tool actually does.
+
+```sh
+./btr run ci --debug
+```
+
 ## Dogfooding
 
 `btr` runs its own dev tasks (defined in the root [`tasks.yaml`](./tasks.yaml)). Each task mounts the

@@ -9,6 +9,7 @@ import (
 	"github.com/moby/buildkit/client/llb/imagemetaresolver"
 
 	"github.com/sakurai-ryo/buildkit-task-runner/internal/config"
+	"github.com/sakurai-ryo/buildkit-task-runner/internal/debug"
 )
 
 // defaultWorkdir is used when a task has a source but no explicit dir.
@@ -20,6 +21,7 @@ type Builder struct {
 	cfg    *config.Config
 	memo   map[string]llb.State
 	mounts map[string]string // local mount name -> absolute local directory
+	depth  int               // current recursion depth, for indented debug logs
 }
 
 // New creates a Builder.
@@ -46,10 +48,13 @@ func (b *Builder) LocalMounts() map[string]string {
 //     "must complete first" as an ordering edge (no data is shared).
 func (b *Builder) State(name string) (llb.State, error) {
 	if s, ok := b.memo[name]; ok {
+		b.logf("task %q: reusing memoized state (shared dependency, built once)", name)
 		return s, nil
 	}
 
 	t := b.cfg.Tasks[name]
+	b.logf("task %q: building LLB (image=%s, cmds=%d, deps=%v)", name, t.Image, len(t.Cmds), t.Deps)
+
 	// WithMetaResolver applies the image config (PATH and other ENV, etc.) so that, e.g.,
 	// `go` on the golang image's PATH is found. Without it llb.Image only takes the rootfs.
 	st := llb.Image(t.Image, llb.WithMetaResolver(imagemetaresolver.Default()))
@@ -60,9 +65,11 @@ func (b *Builder) State(name string) (llb.State, error) {
 	}
 	if workdir != "" {
 		st = st.Dir(workdir)
+		b.logf("task %q:   workdir=%s", name, workdir)
 	}
 	for k, v := range t.Env {
 		st = st.AddEnv(k, v)
+		b.logf("task %q:   env %s=%s", name, k, v)
 	}
 
 	// Register the local source as an llb.Local and remember the directory to mount.
@@ -77,9 +84,11 @@ func (b *Builder) State(name string) (llb.State, error) {
 			llb.ExcludePatterns([]string{".git", "btr"}),
 			llb.WithCustomNamef("local://%s", t.Source),
 		)
+		b.logf("task %q:   source llb.Local(%q) -> mount read-only at %s", name, mountName, workdir)
 	}
 
 	for i, cmd := range t.Cmds {
+		b.logf("task %q:   cmd[%d]: %s", name, i, cmd)
 		run := st.Run(llb.Shlex(cmd), llb.WithCustomNamef("[%s] %s", name, cmd))
 		if t.Source != "" {
 			run.AddMount(workdir, srcState, llb.Readonly)
@@ -87,10 +96,14 @@ func (b *Builder) State(name string) (llb.State, error) {
 		for _, cachePath := range t.Caches {
 			run.AddMount(cachePath, llb.Scratch(),
 				llb.AsPersistentCacheDir(cachePath, llb.CacheMountShared))
+			b.logf("task %q:     cache mount %s (persistent, shared)", name, cachePath)
 		}
 		if i == 0 { // mount deps on the first Run to create ordering edges
 			for _, dep := range t.Deps {
+				b.logf("task %q:   ordering edge: %q must finish before %q (recursing)", name, dep, name)
+				b.depth++
 				ds, err := b.State(dep)
+				b.depth--
 				if err != nil {
 					return llb.State{}, err
 				}
@@ -101,7 +114,17 @@ func (b *Builder) State(name string) (llb.State, error) {
 	}
 
 	b.memo[name] = st
+	b.logf("task %q: done", name)
 	return st, nil
+}
+
+// logf emits a debug line indented by the current recursion depth, so the nested
+// task->dependency structure is visible in the output.
+func (b *Builder) logf(format string, args ...any) {
+	if !debug.Enabled() {
+		return
+	}
+	debug.Logf("llbgen: %*s%s", 2*b.depth, "", fmt.Sprintf(format, args...))
 }
 
 // registerSource records the local directory under a stable mount name (its cleaned

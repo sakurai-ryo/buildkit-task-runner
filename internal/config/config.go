@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/sakurai-ryo/buildkit-task-runner/internal/debug"
 )
 
 // Config corresponds to the whole tasks.yaml.
@@ -39,6 +41,7 @@ func Load(path string) (*Config, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
+	debug.Logf("config: loaded %d task(s) from %s", len(cfg.Tasks), path)
 	return &cfg, nil
 }
 

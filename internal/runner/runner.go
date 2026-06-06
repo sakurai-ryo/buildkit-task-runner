@@ -12,6 +12,8 @@ import (
 	"github.com/moby/buildkit/client/llb"
 	specs "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/tonistiigi/fsutil"
+
+	"github.com/sakurai-ryo/buildkit-task-runner/internal/debug"
 )
 
 // Address resolves the buildkitd address to connect to.
@@ -46,6 +48,7 @@ func Platform(name string) llb.ConstraintsOpt {
 // Run solves (executes) st on buildkitd and prints progress to stdout.
 // localMounts maps llb.Local names to local directories to expose to the daemon.
 func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.State, localMounts map[string]string) error {
+	debug.Logf("runner: connecting to buildkitd at %s", addr)
 	c, err := client.New(ctx, addr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to buildkitd (%s): %w", addr, err)
@@ -56,6 +59,7 @@ func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.S
 	if err != nil {
 		return fmt.Errorf("failed to marshal LLB: %w", err)
 	}
+	debug.Logf("runner: marshaled LLB definition (%d operations in the graph)", len(def.Def))
 
 	solveOpt := client.SolveOpt{}
 	if len(localMounts) > 0 {
@@ -66,6 +70,7 @@ func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.S
 				return fmt.Errorf("failed to expose local directory %q: %w", dir, err)
 			}
 			mounts[name] = fs
+			debug.Logf("runner: exposing local mount %q -> %s", name, dir)
 		}
 		solveOpt.LocalMounts = mounts
 	}
@@ -77,11 +82,13 @@ func Run(ctx context.Context, addr string, platform llb.ConstraintsOpt, st llb.S
 		close(done)
 	}()
 
+	debug.Logf("runner: solving (buildkitd runs the graph with parallelism and caching)...")
 	_, err = c.Solve(ctx, def, solveOpt, ch)
 	<-done
 	if err != nil {
 		return fmt.Errorf("solve failed: %w", err)
 	}
+	debug.Logf("runner: solve completed")
 	return nil
 }
 
