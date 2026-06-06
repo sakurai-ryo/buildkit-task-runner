@@ -28,7 +28,7 @@ func newRootCmd() *cobra.Command {
 		Long:         "btr declares tasks in YAML, compiles each into a BuildKit LLB state, and executes them on buildkitd.",
 		SilenceUsage: true,
 	}
-	root.AddCommand(newRunCmd(), newListCmd())
+	root.AddCommand(newRunCmd(), newListCmd(), newGraphCmd())
 	return root
 }
 
@@ -67,6 +67,33 @@ func newRunCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&file, "file", "f", "tasks.yaml", "task definition file")
 	cmd.Flags().StringVar(&addr, "addr", "", "buildkitd address (e.g. tcp://127.0.0.1:1234)")
 	cmd.Flags().StringVar(&platform, "platform", "", "target platform (e.g. linux/arm64)")
+	return cmd
+}
+
+func newGraphCmd() *cobra.Command {
+	var file string
+	cmd := &cobra.Command{
+		Use:   "graph [task]",
+		Short: "Print the task dependency graph as a Mermaid flowchart",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg, err := config.Load(file)
+			if err != nil {
+				return err
+			}
+			target := ""
+			if len(args) == 1 {
+				target = args[0]
+			}
+			out, err := graph.Mermaid(cfg, target)
+			if err != nil {
+				return err
+			}
+			fmt.Print(out)
+			return nil
+		},
+	}
+	cmd.Flags().StringVarP(&file, "file", "f", "tasks.yaml", "task definition file")
 	return cmd
 }
 

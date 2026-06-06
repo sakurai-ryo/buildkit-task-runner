@@ -1,0 +1,101 @@
+name: buildkit-demo
+
+# Learning demo: run btr against a real buildkitd and surface the BuildKit
+# mechanisms (dependency graph, parallelism, caching) in the job summary.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Start buildkitd (TCP)
+        run: |
+          docker run -d --name buildkitd --privileged \
+            -p 1234:1234 moby/buildkit:latest --addr tcp://0.0.0.0:1234
+          for _ in $(seq 1 30); do
+            docker logs buildkitd 2>&1 | grep -q "running server on" && break
+            sleep 1
+          done
+          docker logs buildkitd 2>&1 | tail -3
+
+      - name: Build btr
+        run: go build -o btr ./cmd/btr
+
+      - name: List tasks
+        run: ./btr list -f tasks.yaml
+
+      # Logs are written to RUNNER_TEMP (outside the checkout) so that the local
+      # source mounted via llb.Local stays byte-identical between the cold and warm
+      # runs -- otherwise the changed context would bust the content cache.
+      - name: Dump dependency graph (Mermaid)
+        run: ./btr graph ci -f tasks.yaml | tee "$RUNNER_TEMP/graph.mmd"
+
+      - name: Cold run (populates cache)
+        env:
+          BUILDKIT_HOST: tcp://127.0.0.1:1234
+        run: ./btr run ci -f tasks.yaml 2>&1 | tee "$RUNNER_TEMP/cold.log"
+
+      - name: Warm run (cache hits)
+        env:
+          BUILDKIT_HOST: tcp://127.0.0.1:1234
+        run: ./btr run ci -f tasks.yaml 2>&1 | tee "$RUNNER_TEMP/warm.log"
+
+      - name: Write learning summary
+        if: always()
+        run: |
+          summary="$GITHUB_STEP_SUMMARY"
+
+          # 1) Learning notes (kept in the repo so they are viewable both places).
+          cat docs/buildkit-mechanisms.md >> "$summary"
+
+          # 2) The dependency graph rendered as a Mermaid diagram.
+          {
+            echo
+            echo '## 依存グラフ（この実行で生成）'
+            echo '矢印 `a --> b` は「a が b に依存」を表す。'
+            echo
+            echo '```mermaid'
+            cat "$RUNNER_TEMP/graph.mmd"
+            echo '```'
+          } >> "$summary"
+
+          # 3) Cache evidence: count cached vertices on the warm run.
+          if [ -f "$RUNNER_TEMP/warm.log" ]; then
+            cached=$(grep -c '(cached)' "$RUNNER_TEMP/warm.log" || true)
+            executed=$(grep -c '(done)' "$RUNNER_TEMP/warm.log" || true)
+            {
+              echo
+              echo '## キャッシュの実演（2回目の実行）'
+              echo "- キャッシュヒットした頂点: **${cached}**"
+              echo "- 再実行された頂点: **${executed}**"
+              echo
+              echo '<details><summary>Cold run（1回目）ログ</summary>'
+              echo
+              echo '```'
+              grep -vE 'docker-image://' "$RUNNER_TEMP/cold.log" || cat "$RUNNER_TEMP/cold.log"
+              echo '```'
+              echo '</details>'
+              echo
+              echo '<details><summary>Warm run（2回目）ログ</summary>'
+              echo
+              echo '```'
+              grep -vE 'docker-image://' "$RUNNER_TEMP/warm.log" || cat "$RUNNER_TEMP/warm.log"
+              echo '```'
+              echo '</details>'
+            } >> "$summary"
+          fi
+
+      - name: Stop buildkitd
+        if: always()
+        run: docker rm -f buildkitd || true
