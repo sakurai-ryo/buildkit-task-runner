@@ -208,6 +208,80 @@ for _, cachePath := range t.Caches {
 - `btr` ではこれで `/go/pkg/mod`（モジュールキャッシュ）と `/root/.cache/go-build`（ビルドキャッシュ）を共有し、タスク間・実行間で **Go の再ダウンロード／再コンパイルを回避**している。これが無いと毎タスクが空のコンテナで巨大な依存ツリーを取得・コンパイルし直して非現実的に遅くなる。
 - ⚠️ 注意：永続キャッシュの**中身**はキャッシュキーに含まれない（後述の 5-3 のコンテンツキャッシュとは別物）。あくまで「速くするための作業領域」。
 
+### 4-8. できあがる LLB DAG
+
+`State` の再帰が終わると、`deps` を辺にした **LLB DAG** ができあがる。ここで重要なのは
+**「1タスク = 1ノードではない」**こと。各タスクは複数の LLB 頂点に展開される。
+
+1タスクの展開:
+- `llb.Image(image)` → イメージ取得の頂点 1つ
+- `cmds` の各コマンド → `Run` の実行（Exec）頂点（`Root()` で順に積む）
+- `source` を使うなら `llb.Local` の頂点 1つ
+- `deps` → 依存タスクの**最終出力**を `AddMount` でつなぐ → **辺**（4-4 / [llbgen.go#L91-L99](https://github.com/sakurai-ryo/buildkit-task-runner/blob/4fcb094/internal/llbgen/llbgen.go#L91-L99)）
+
+#### 例：`examples/tasks.yaml`（`all → {lint, build} → deps`）
+
+タスク依存グラフ（論理）はこうだが…
+
+```mermaid
+flowchart TD
+  all --> lint
+  all --> build
+  lint --> deps
+  build --> deps
+```
+
+実際に Marshal される LLB DAG はこう展開される（実線 = ベース rootfs、点線 = `deps` のマウント辺）:
+
+```mermaid
+flowchart TD
+  imgGo["image: golang:1.26-alpine"]
+  imgAlp["image: alpine:3.20"]
+
+  subgraph T_deps["task: deps"]
+    d1["exec: echo downloading deps"]
+    d2["exec: sleep 1"]
+  end
+  subgraph T_lint["task: lint"]
+    l1["exec: echo linting"]
+  end
+  subgraph T_build["task: build"]
+    b1["exec: echo building"]
+  end
+  subgraph T_all["task: all"]
+    a1["exec: echo done"]
+  end
+
+  imgGo --> d1 --> d2
+  imgGo --> l1
+  imgGo --> b1
+  imgAlp --> a1
+
+  d2 -. mount .-> l1
+  d2 -. mount .-> b1
+  l1 -. mount .-> a1
+  b1 -. mount .-> a1
+```
+
+ここで効いている dedup / メモ化:
+
+- **`image: golang` は3タスク共通**なので digest dedup で **1頂点**に畳まれる（図でも `imgGo` は1つ）。
+- **`deps` はメモ化**（4-5）で1回だけ構築され、`lint`/`build` の両方が**同じ `d2`（deps の最終出力）**を指す。
+- `lint` と `build` は互いに独立した枝 → buildkitd が**並列実行**。`d2` は共有なので**1回だけ実行**。
+
+#### 頂点の数え方（`--debug` の "N operations" の正体）
+
+この例で `--debug` を付けると `marshaled LLB definition (8 operations in the graph)` と出る。内訳:
+
+| 種類 | 数 |
+|------|----|
+| Exec 頂点（deps×2, lint, build, all） | 5 |
+| Image 頂点（golang, alpine） | 2 |
+| Marshal が末尾に足す出力 op | 1 |
+| **合計** | **8** |
+
+タスク数（4）とは一致せず、**展開・重複排除後の頂点数**になっているのが分かる。
+
 ---
 
 ## 5. Solve：buildkitd に投げて実行する (`internal/runner`)
